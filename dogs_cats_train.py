@@ -1,50 +1,56 @@
 import sys
 import getopt
+import os
 
 import tensorflow as tf
 import numpy as np
 
-from cifar10_input import IMAGE_X
-from cifar10_input import IMAGE_Y
-from cifar10_input import IMAGE_C
-from cifar10_input import NUM_CLASSES
+from dogs_cats_input import IMAGE_X
+from dogs_cats_input import IMAGE_Y
+from dogs_cats_input import NUM_CLASSES
 
-from cifar10_input import BuildInputPipeline
-from cifar10_model import inference
-from cifar10_model import loss_func
-from cifar10_model import AlexNet
+from dogs_cats_input import BuildInputPipeline
+#from alexnet_model import inference
+from alexnet_model import loss_func
+from alexnet_model import AlexNet
 
 # constants
-train_set_size = 50000
-test_set_size = 10000
-train_data_path = ['./data/data_batch_%d.bin' % (i) for i in range(1,6)]
-test_data_path = ['./data/test_batch.bin']
+train_set_size = 25000
+test_set_size = 30
+train_data_path = ['./data/train/']
+test_data_path = ['./data/test/']
 weights_path = './alexnet_weights/bvlc_alexnet.npy'
 model_path = './tmp/'
 summary_path = './tensorboard/'
 summary_name = 'summary-default'    # tensorboard default summary dir
 
 # hyperparameters
-batch_size = 50
+train_batch_size = 50
+test_batch_size = 50
 num_epochs = 50
-lr0 = 1e-3
+lr0 = 1e-5
 dropout_rate = 0.5
 
 # add a switch to control model checkpoint saver (because we do not need checkpoint when studying)
 _save_ckpt = False
 
 ############################# build the model #############################
+# get all file names
+train_image_path, train_image_names = os.listdir(train_data_path)
+test_image_path, test_image_names = os.listdir(test_data_path)
 # build the input pipeline
 with tf.name_scope('input_pipeline'):
 	# pipeline to read from training set
-	train_dataset = BuildInputPipeline(file_name_list=train_data_path,
-										batch_size=batch_size,
+	train_dataset = BuildInputPipeline(file_path=train_image_path,
+										file_names=train_image_names,
+										batch_size=train_batch_size,
 										num_parallel_calls=4,
 										num_epoch=1)
 	train_iterator = train_dataset.make_initializable_iterator()
 	# pipeline to read from test set
-	test_dataset = BuildInputPipeline(file_name_list=test_data_path,
-										batch_size=batch_size,
+	test_dataset = BuildInputPipeline(file_path=test_image_path,
+										file_names=test_image_names,
+										batch_size=test_batch_size,
 										num_parallel_calls=4,
 										num_epoch=1)
 	test_iterator = test_dataset.make_initializable_iterator()
@@ -57,8 +63,8 @@ with tf.name_scope('input_pipeline'):
 	labels, images = iterator.get_next()
 	# build placeholder for model input and output
 	# batch of data will be fed to these placeholders
-	input_images = tf.placeholder(tf.float32, shape=[batch_size, IMAGE_X, IMAGE_Y, IMAGE_C])
-	input_labels = tf.placeholder(tf.int32, shape=[batch_size]
+	input_images = tf.placeholder(tf.float32, shape=(None, IMAGE_X, IMAGE_Y, 3))
+	input_labels = tf.placeholder(tf.int32, shape=None)
 	# dropout rate will be fed to this placeholder
 	keep_prob = tf.placeholder(tf.float32)
 

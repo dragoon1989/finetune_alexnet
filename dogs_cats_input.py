@@ -1,87 +1,94 @@
 import tensorflow as tf
+import numpy as np
 
-# cifar10 classes = 10
-NUM_CLASSES = 10
-# raw cifar10 image size = 32x32 with RGB channels
-RAW_IMAGE_SIZE = 32
-IMAGE_C = 3
-# this size is too small to be fed to AlexNet, so the raw image will be zoomed up in pipeline
+import cv2
+import os
+import random
+
+
+# dogs (1) or cats (0)
+NUM_CLASSES = 2
+
+# the raw images from kaggle are resized to 227x227 RGB files
 IMAGE_X = 227
 IMAGE_Y = 227
-# ImageNet mean for each channel
-IMGNET_MEAN = [104., 117., 124.]
+# image net mean
+IMGNET_MEAN = [123.68, 116.779, 103.939]
 
-# zoom up single batch of raw images to desired size
-# this must be applied after dataset batch op
-def __zoom_up_image_batch(images):
+
+
+# analyze a jpg file path and get its label
+def __analyze_jpg_label(img_file_path):
 	'''
-	input:
-		images : single batch of raw images (BATCH_SIZE x RAW_IMAGE_SIZE x RAW_IMAGE_SIZE x IMAGE_C, dtype=tf.float32
-	output:
-		resized image (BATCH_SIZE x IMAG_X x IMAG_Y x IMAGE_C, dtype=tf.float32)
+	input : img_file_path	string scalar tensor
+	output : a scalar tensor with dtype=tf.int32
 	'''
-	return tf.image.resize_bilinear(images=images, size=[IMAGE_X, IMAGE_Y])
+	# split the path to get file name using '/'(Unix-style path)
+	segments = tf.string_split(source=[img_file_path], delimiter='/')
+	# get file name prefix
+	title = segments.values[-1]		# get file name excluding the path part
+	title = tf.substr(title, pos=0, len=3)	# get file name prefix (first 3 char)
+	# convert to image label (cat or dog)
+	logits = tf.equal(x=title, y='dog')
+	return tf.to_int32(logits)
 
-# parse single example from cifar10 dataset
-def __parse_single_example(example):
-	''' input : example --- single example (1 + 1024x3 bytes)
-	   output: label --- int32 scalar tensor
-	   	       image --- float32 3D tensor (format = HWC)'''
-	raw_bytes = tf.decode_raw(bytes=example, out_type=tf.uint8)
-	# convert label to tf.int32
-	label = tf.to_int32(raw_bytes[0])
-	# reshape to scalar tensor
-	label = tf.reshape(tensor=label, shape=[])
-	# convert image to tf.float32
-	image = tf.to_float(raw_bytes[1:(1+RAW_IMAGE_SIZE*RAW_IMAGE_SIZE*3)])
-	# reshape image to CHW format
-	image = tf.reshape(tensor=image, shape=[3, RAW_IMAGE_SIZE, RAW_IMAGE_SIZE])
-	# permute the image to HWC format (use tf.transpose)
-	#image = tf.transpose(a=image, perm=[2, 0, 1])
-	image = tf.transpose(a=image, perm=[1, 2, 0])
-	# subtrack the image mean
-	image -= np.array(IMGNET_MEAN, dtype=np.float32)
+# read a jpg file and convert it to alexnet input format
+def __read_jpg_file(img_file_path):
+	'''
+	'''
+	# read raw bytes
+	raw_bytes = tf.read_file(img_file_path)
+	# this function is not supported in latest version ?
+	raw_img = tf.image.decode_jpeg(raw_bytes)
+	# resize the image to alexnet input size
+	resized_img = tf.image.resize_images(raw_img, size=[IMAGE_X, IMAGE_Y])
 	# over
-	return label,image
+	return tf.to_float(resized_img)
 
-# build a dataset that consists of all examples from a given data file
-def __read_single_file(file_name):
-	''' input:	file_name --- single data file name (scalar string tensor)
-	   output:	dataset --- a dataset that consists of (label, image) elements'''
-	# build a fixed length dataset
-	dataset = tf.data.FixedLengthRecordDataset(filenames=file_name, record_bytes=1+3*RAW_IMAGE_SIZE*RAW_IMAGE_SIZE)
-	# parse all examples and form a new dataset
-	dataset = dataset.map(map_func=__parse_single_example)
+# read single jpg file and return the label and image data
+def __parse_single_example(img_file_path):
+	''' input:	img_file_path --- single jpg file path (scalar string)
+		output:	a tuple (label, image), with dtype = int and float32
+				output image with shape 
+	'''
+	# get the image label
+	label = __analyze_jpg_label(img_file_path)
+	# read image data
+	image = __read_jpg_file(img_file_path)
+	# subtract image mean
+	image = image - IMGNET_MEAN
 	# over
-	return dataset
+	return label, image
 
 # build input pipeline using datasets
-def BuildInputPipeline(file_name_list,
+def BuildInputPipeline(file_path,
+				file_names,
 				batch_size,
 				num_parallel_calls=1,
 				num_epoch=1):
-	''' input:	file_name_list --- 1D string tensor
+	''' input:	file_path --- python string
+			file_names --- python 1D string list
 			batch_size --- size of batch
 			num_parallel_calls
 			num_epoch --- number of epochs
 	   output:	dataset --- a dataset consisting of batches of (label,image) data from input files'''
+	# get file path list
+	file_path_names = [os.path.join(file_path, _name_) for _name_ in file_names]
+	# shuffle the list
+	random.shuffle(file_path_names)
+	# transform 1D python string list to 1D tf string tensor
+	tf_file_path_names = tf.constant(file_path_names, dtype=tf.string)
 	# build a file name dataset
-	file_names_dataset = tf.data.Dataset.from_tensor_slices(file_name_list)
-	# build a dataset that read all files named by file_names_dataset
+	file_dataset = tf.data.Dataset.from_tensor_slices(tf_file_path_names)
+	# build a dataset that read all files
 	# the dataset consists of (label, image) pairs read from all files indicated in input list
-	dataset = file_names_dataset.interleave(map_func=__read_single_file,
-								     cycle_length=4,
-								     block_length=16,
-								     num_parallel_calls=num_parallel_calls)
+	dataset = file_dataset.map(map_func=__parse_single_example, num_parallel_calls=num_parallel_calls)
 	# set the epoch
 	dataset = dataset.repeat(count=num_epoch)
 	# shuffle the dataset
 	dataset = dataset.shuffle(buffer_size=10*batch_size)
 	# set the batch size
 	dataset = dataset.batch(batch_size=batch_size)
-	# resize images
-	_resize_op = lambda labels, images : (labels, __zoom_up_image_batch(images))
-	dataset = dataset.map(map_func=_resize_op, num_parallel_calls=num_parallel_calls)
 	# use prefetch to allow asynchronous input
 	# i think prefetch one batch is enouth
 	dataset = dataset.prefetch(buffer_size=1)
