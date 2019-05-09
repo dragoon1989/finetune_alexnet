@@ -10,6 +10,7 @@ from dogs_cats_input import IMAGE_Y
 from dogs_cats_input import NUM_CLASSES
 
 from dogs_cats_input import BuildInputPipeline
+from dogs_cats_input import BuildAugmentedInputPipeline
 #from alexnet_model import inference
 from alexnet_model import loss_func
 from alexnet_model import AlexNet
@@ -30,25 +31,28 @@ test_batch_size = 50
 num_epochs = 50
 lr0 = 1e-5
 dropout_rate = 0.5
+l1_scale = 1e-3
+l2_scale = 1e-3
 
 # add a switch to control model checkpoint saver (because we do not need checkpoint when studying)
 _save_ckpt = False
 
 ############################# build the model #############################
 # get all file names
-train_image_path, train_image_names = os.listdir(train_data_path)
-test_image_path, test_image_names = os.listdir(test_data_path)
+train_image_names = os.listdir(train_data_path)
+test_image_names = os.listdir(test_data_path)
 # build the input pipeline
 with tf.name_scope('input_pipeline'):
 	# pipeline to read from training set
-	train_dataset = BuildInputPipeline(file_path=train_image_path,
+	aug_data_size, train_dataset = BuildAugmentedInputPipeline(file_path=train_data_path,
 										file_names=train_image_names,
 										batch_size=train_batch_size,
+										raw_data_size=train_set_size,
 										num_parallel_calls=4,
 										num_epoch=1)
 	train_iterator = train_dataset.make_initializable_iterator()
 	# pipeline to read from test set
-	test_dataset = BuildInputPipeline(file_path=test_image_path,
+	test_dataset = BuildInputPipeline(file_path=test_data_path,
 										file_names=test_image_names,
 										batch_size=test_batch_size,
 										num_parallel_calls=4,
@@ -85,6 +89,9 @@ with tf.name_scope('train_loss'):
 	batch_loss, total_loss = loss_func(input_labels, logits_before_softmax)
 	# summary the train loss
 	tf.summary.scalar(name='train_loss', tensor=batch_loss)
+	# add L1 and L2 regularization
+	#model.add_l1_regularization(l1_scale)
+	model.add_l2_regularization(l2_scale)
 
 # optimize model parameters
 with tf.name_scope('optimization'):

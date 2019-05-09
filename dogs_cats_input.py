@@ -59,8 +59,70 @@ def __parse_single_example(img_file_path):
 	image = image - IMGNET_MEAN
 	# over
 	return label, image
+	
+# data augmentation functions
+def __fliplr(label, image):
+	''' input:	label --- original image label
+				image --- original image
+		output:	label, flipped_img '''
+	return label, tf.image.flip_left_right(image)
+
+def __add_noise(label, image):
+	''' input:	label --- original image label
+				image --- original image
+		output:	label, noised_img '''
+	noise = tf.random_normal(shape=(IMAGE_X, IMAGE_Y, 3), mean=IMGNET_MEAN[0], stddev=10)
+	# add the noise to each channel
+	return label, image+noise
 
 # build input pipeline using datasets
+def BuildAugmentedInputPipeline(file_path,
+				file_names,
+				batch_size,
+				raw_data_size,
+				num_parallel_calls=1,
+				num_epoch=1):
+	''' input:	file_path --- python string
+			file_names --- python 1D string list
+			batch_size --- size of batch
+			raw_data_size --- size of original dataset
+			num_parallel_calls
+			num_epoch --- number of epochs
+	   output:	data_size --- the augmented dataset size
+				dataset --- a dataset consisting of batches of (label,image) data from input files'''
+	# get file path list
+	file_path_names = [os.path.join(file_path, _name_) for _name_ in file_names]
+	# shuffle the list
+	random.shuffle(file_path_names)
+	# transform 1D python string list to 1D tf string tensor
+	tf_file_path_names = tf.constant(file_path_names, dtype=tf.string)
+	# build a file name dataset
+	file_dataset = tf.data.Dataset.from_tensor_slices(tf_file_path_names)
+	# build a dataset that read all files
+	# the dataset consists of (label, image) pairs read from all files indicated in input list
+	dataset = file_dataset.map(map_func=__parse_single_example, num_parallel_calls=num_parallel_calls)
+	data_size = raw_data_size
+	# augment the raw dataset
+	# 1. use left-right flip augmentation:
+	flip_dataset = dataset.map(map_func=__fliplr, num_parallel_calls=num_parallel_calls)
+	data_size += raw_data_size
+	# 2. use Gaussian noise augmentation:
+	noise_dataset = dataset.map(map_func=__add_noise, num_parallel_calls=num_parallel_calls)
+	data_size += raw_data_size
+	# concatenate the dataset
+	dataset = dataset.concatenate(flip_dataset).concatenate(noise_dataset)
+	# set the epoch
+	dataset = dataset.repeat(count=num_epoch)
+	# shuffle the dataset
+	dataset = dataset.shuffle(buffer_size=10*batch_size)
+	# set the batch size
+	dataset = dataset.batch(batch_size=batch_size)
+	# use prefetch to allow asynchronous input
+	# i think prefetch one batch is enouth
+	dataset = dataset.prefetch(buffer_size=1)
+	# over
+	return data_size, dataset
+
 def BuildInputPipeline(file_path,
 				file_names,
 				batch_size,

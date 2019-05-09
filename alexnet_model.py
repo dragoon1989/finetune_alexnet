@@ -91,6 +91,23 @@ class AlexNet(object):
 							var = tf.get_variable('weights', trainable=False)
 							session.run(var.assign(data))
 
+	# add L1 regularization
+	def add_l1_regularization(self, scale):
+		with tf.name_scope('regularization'):
+			l1_regularizer = tf.contrib.layers.l1_regularizer(scale=scale)
+			# only apply to trained layers
+			for trained_layer in self.SKIP_LAYER:
+				weights = tf.get_collection(key='model_weights', scope=trained_layer)
+				tf.contrib.layers.apply_regularization(l1_regularizer, weights_list=weights)
+
+	# add L2 regularization
+	def add_l2_regularization(self, scale):
+		with tf.name_scope('regularization'):
+			l2_regularizer = tf.contrib.layers.l2_regularizer(scale=scale)
+			# only apply to trained layers
+			for trained_layer in self.SKIP_LAYER:
+				weights = tf.get_collection(key='model_weights', scope=trained_layer)
+				tf.contrib.layers.apply_regularization(l2_regularizer, weights_list=weights)
 
 def conv(x, filter_height, filter_width, num_filters, 
 		 stride_y, stride_x, name, padding='SAME', groups=1):
@@ -102,6 +119,7 @@ def conv(x, filter_height, filter_width, num_filters,
 	input_channels = int(x.get_shape()[-1])
 
 	# Create lambda function for the convolution
+	# Note : tf.nn module do not add weights to global collection
 	convolve = lambda i, k: tf.nn.conv2d(i, k,
 										 strides=[1, stride_y, stride_x, 1],
 										 padding=padding)
@@ -113,6 +131,8 @@ def conv(x, filter_height, filter_width, num_filters,
 													input_channels/groups,
 													num_filters])
 		biases = tf.get_variable('biases', shape=[num_filters])
+		# add the weights to our own global collection (within current name scope)
+		tf.add_to_collection(name='model_weights', value=weights)
 
 	if groups == 1:
 		conv = convolve(x, weights)
@@ -145,7 +165,9 @@ def fc(x, num_in, num_out, name, relu=True):
 		weights = tf.get_variable('weights', shape=[num_in, num_out],
 								  trainable=True)
 		biases = tf.get_variable('biases', [num_out], trainable=True)
-
+		# add the weights to our own global collection (within current name scope)
+		tf.add_to_collection(name='model_weights', value=weights)
+		
 		# Matrix multiply weights and inputs and add bias
 		act = tf.nn.xw_plus_b(x, weights, biases, name=scope.name)
 
